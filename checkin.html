@@ -256,6 +256,8 @@ async function startFaceCheck() {
 
 async function runChallenges() {
   const video = $('video');
+  const { data: cfg } = await sb.from('settings').select('liveness_seconds').single();
+  const limitSec = cfg?.liveness_seconds ?? 25;
   const steps = buildChallenges();
   let idx = 0, holdFrames = 0;
   let openEar = null, eyesClosedSeen = false;
@@ -268,10 +270,10 @@ async function runChallenges() {
   $('instruction').textContent = LABELS[steps[0]];
 
   while (running) {
-    if (Date.now() - startedAt > TIME_LIMIT_MS) {
-      stopCamera();
-      return showResult(false, 'หมดเวลา', 'ทำตามคำสั่งให้ครบภายใน 25 วินาที แล้วลองใหม่');
-    }
+if (Date.now() - startedAt > limitSec * 1000) {
+  stopCamera();
+  return showResult(false, 'หมดเวลา', `ทำตามคำสั่งให้ครบภายใน ${limitSec} วินาที แล้วลองใหม่`);
+}
 
     const r = await faceapi.detectSingleFace(video, tinyOpts()).withFaceLandmarks();
     if (!running) return;
