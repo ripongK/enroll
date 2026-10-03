@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>เช็กชื่อมาเรียน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1/dist/face-api.js"></script>
+<style>
+  :root {
+    --ink: #17324D; --ink-soft: #5B6B7C; --paper: #F6F8FA; --surface: #FFFFFF;
+    --line: #D9E0E7; --jade: #1F8A70; --saffron: #E39B2D; --danger: #C0392B;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: "Anuphan", "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
+    background: var(--paper); color: var(--ink); font-size: 17px; line-height: 1.6;
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+  }
+  main { max-width: 480px; margin: 0 auto; padding: 20px 18px 40px; }
+  h1 { font-size: 1.5rem; line-height: 1.3; margin: 8px 0 4px; }
+  p.sub { margin: 0 0 20px; color: var(--ink-soft); }
+  .hidden { display: none !important; }
+  label { display: block; font-weight: 500; margin: 14px 0 6px; }
+  input {
+    width: 100%; font: inherit; color: inherit; padding: 12px 14px;
+    border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface);
+  }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
+  button {
+    font: inherit; font-weight: 500; cursor: pointer; border: none; border-radius: 10px;
+    padding: 14px 18px; background: var(--ink); color: #fff; width: 100%;
+  }
+  button.secondary { background: transparent; color: var(--ink); border: 1.5px solid var(--line); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .stack > * + * { margin-top: 10px; }
+  .msg { margin-top: 14px; min-height: 1.6em; color: var(--ink-soft); }
+  .msg.error { color: var(--danger); }
+  .msg.ok { color: var(--jade); }
+
+  .profile { padding: 18px 0; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
+  .profile .name { font-size: 1.3rem; font-weight: 700; }
+  .profile .meta { color: var(--ink-soft); }
+
+  /* วงกล้อง + วงแหวนแสดงขั้นตอนการพิสูจน์ว่าเป็นคนจริง */
+  .stage { position: relative; width: min(80vw, 320px); aspect-ratio: 1; margin: 16px auto 8px; }
+  .stage video {
+    position: absolute; inset: 9%; width: 82%; height: 82%; object-fit: cover;
+    border-radius: 50%; transform: scaleX(-1); background: #DDE3E9;
+  }
+  .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .seg { fill: none; stroke: var(--line); stroke-width: 7; stroke-linecap: round; transition: stroke .3s; }
+  .seg.filled { stroke: var(--jade); }
+  .seg.current { stroke: var(--saffron); }
+  .instruction { text-align: center; font-size: 1.35rem; font-weight: 700; margin: 4px 0 0; min-height: 2.2em; }
+  .hint { text-align: center; color: var(--ink-soft); margin: 0; min-height: 1.6em; }
+
+  .result { text-align: center; padding: 30px 0 10px; }
+  .result .big { font-size: 1.6rem; font-weight: 700; }
+  .result.pass .big { color: var(--jade); }
+  .result.fail .big { color: var(--danger); }
+  .result .detail { color: var(--ink-soft); margin-top: 6px; }
+
+  /* รายการตรวจสอบทีละขั้น */
+  .checklist { padding: 24px 0 4px; }
+  .ck { display: flex; align-items: center; gap: 12px; padding: 12px 0; color: var(--ink-soft); border-bottom: 1px solid var(--line); }
+  .ck .dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+  .ck.doing { color: var(--ink); font-weight: 500; }
+  .ck.doing .dot { border-color: var(--saffron); background: var(--saffron); animation: pulse 1s infinite alternate; }
+  .ck.done { color: var(--ink); }
+  .ck.done .dot { border-color: var(--jade); background: var(--jade); }
+  .ck.fail { color: var(--danger); }
+  .ck.fail .dot { border-color: var(--danger); background: var(--danger); }
+  @keyframes pulse { to { opacity: .35; } }
+
+  @media (prefers-reduced-motion: reduce) { .seg { transition: none; } .ck.doing .dot { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===== เข้าสู่ระบบ ===== -->
+  <section id="view-login">
+    <h1>เช็กชื่อมาเรียน</h1>
+    <p class="sub">เข้าสู่ระบบด้วยรหัสนักเรียน</p>
+    <label for="code">รหัสนักเรียน</label>
+    <input id="code" inputmode="numeric" autocomplete="username" placeholder="เช่น 19829">
+    <label for="password">รหัสผ่าน</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <div class="stack" style="margin-top:18px"><button id="btn-login">เข้าสู่ระบบ</button></div>
+    <p id="login-msg" class="msg"></p>
+  </section>
+
+  <!-- ===== หน้าหลัก ===== -->
+  <section id="view-home" class="hidden">
+    <div class="profile">
+      <div id="p-name" class="name"></div>
+      <div id="p-meta" class="meta"></div>
+    </div>
+    <div class="stack">
+      <button id="btn-start">เริ่มเช็กชื่อ</button>
+      <button id="btn-logout" class="secondary">ออกจากระบบ</button>
+    </div>
+    <p id="home-msg" class="msg"></p>
+  </section>
+
+  <!-- ===== ตรวจเครื่องและตำแหน่ง ===== -->
+  <section id="view-locate" class="hidden">
+    <div class="checklist">
+      <div id="ck-device" class="ck"><span class="dot"></span><span>ตรวจสอบมือถือเครื่องนี้</span></div>
+      <div id="ck-gps" class="ck"><span class="dot"></span><span>หาตำแหน่ง GPS</span></div>
+      <div id="ck-area" class="ck"><span class="dot"></span><span>ตรวจว่าอยู่ในพื้นที่โรงเรียน</span></div>
+      <div class="ck"><span class="dot"></span><span>ยืนยันใบหน้า</span></div>
+    </div>
+    <p id="locate-hint" class="hint" style="margin-top:16px"></p>
+    <div class="stack" style="margin-top:18px"><button id="btn-cancel-locate" class="secondary">ยกเลิก</button></div>
+  </section>
+
+  <!-- ===== ยืนยันใบหน้า ===== -->
+  <section id="view-face" class="hidden">
+    <div class="stage">
+      <video id="video" autoplay muted playsinline></video>
+      <svg id="ring" viewBox="0 0 100 100" aria-hidden="true"></svg>
+    </div>
+    <p id="instruction" class="instruction"></p>
+    <p id="hint" class="hint"></p>
+    <div class="stack" style="margin-top:18px"><button id="btn-cancel" class="secondary">ยกเลิก</button></div>
+  </section>
+
+  <!-- ===== ผลลัพธ์ ===== -->
+  <section id="view-result" class="hidden">
+    <div id="result" class="result">
+      <div id="r-big" class="big"></div>
+      <div id="r-detail" class="detail"></div>
+    </div>
+    <div class="stack" style="margin-top:20px">
+      <button id="btn-again">ลองอีกครั้ง</button>
+      <button id="btn-home" class="secondary">กลับหน้าหลัก</button>
+    </div>
+  </section>
+
+</main>
+
+<script>
+/* =========================================================
+   1) ตั้งค่า — แก้ให้ตรงกับโปรเจกต์ของคุณ
+   ========================================================= */
+const SUPABASE_URL = 'https://xyjyharwnogjrqzzfpsd.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_O9mvVjQfm4E0sUbPOr7hdg_9WwWRm1K';
+const STUDENT_EMAIL_DOMAIN = '@student.local';   // อีเมลสมมติ: รหัสนักเรียน + โดเมนนี้
+
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1/model/';
+const DEFAULT_LIVENESS_SEC = 40; // ใช้เมื่ออ่านค่า liveness_seconds จากตาราง settings ไม่ได้
+const GPS_WAIT_MS = 15000;       // รอสัญญาณ GPS สูงสุด 15 วินาที
+const GPS_GOOD_ACCURACY = 25;    // ถ้าแม่นยำถึง 25 เมตรแล้ว ใช้ค่านั้นได้เลย ไม่ต้องรอต่อ
+const DEVICE_KEY = 'attendance_device_id';
+const MIN_FACE_RATIO = 0.25;   // ใบหน้าต้องกว้างอย่างน้อย 25% ของภาพ
+const SAME_PERSON_MAX = 0.5;   // ภาพต้นและภาพท้ายต้องเป็นคนเดียวกัน
+
+/* =========================================================
+   2) ตัวแปรและเครื่องมือ
+   ========================================================= */
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+const tinyOpts = () => new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+let me = null, stream = null, modelsReady = false, running = false;
+let lastLocation = null;   // ตำแหน่งที่ผ่านการตรวจ (ขั้นที่ 6 จะส่งไปพร้อมการเช็กชื่อ)
+let cancelled = false;
+
+function show(view) {
+  ['view-login', 'view-home', 'view-locate', 'view-face', 'view-result']
+    .forEach(v => $(v).classList.toggle('hidden', v !== view));
+}
+function setMsg(el, text, type = '') { el.textContent = text; el.className = 'msg' + (type ? ' ' + type : ''); }
+
+/* =========================================================
+   3) เข้าสู่ระบบ
+   ========================================================= */
+$('btn-login').onclick = async () => {
+  const code = $('code').value.trim();
+  if (!code) return setMsg($('login-msg'), 'กรอกรหัสนักเรียน', 'error');
+  setMsg($('login-msg'), 'กำลังเข้าสู่ระบบ…');
+  const { error } = await sb.auth.signInWithPassword({
+    email: code + STUDENT_EMAIL_DOMAIN, password: $('password').value
+  });
+  if (error) return setMsg($('login-msg'), 'รหัสนักเรียนหรือรหัสผ่านไม่ถูกต้อง', 'error');
+  setMsg($('login-msg'), '');
+  loadProfile();
+};
+
+async function loadProfile() {
+  const { data: { user } } = await sb.auth.getUser();
+  const { data, error } = await sb.from('students')
+    .select('id, student_code, prefix, first_name, last_name, grade, room, class_no')
+    .eq('user_id', user.id).maybeSingle();
+  if (error || !data) {
+    await sb.auth.signOut(); show('view-login');
+    return setMsg($('login-msg'), 'บัญชีนี้ยังไม่ได้ผูกกับข้อมูลนักเรียน ติดต่อครูประจำชั้น', 'error');
+  }
+  me = data;
+  $('p-name').textContent = `${me.prefix ?? ''}${me.first_name} ${me.last_name}`;
+  $('p-meta').textContent = `รหัส ${me.student_code}  ชั้น ${me.grade}/${me.room}` + (me.class_no ? `  เลขที่ ${me.class_no}` : '');
+  show('view-home');
+}
+
+$('btn-logout').onclick = async () => { await sb.auth.signOut(); show('view-login'); };
+
+/* =========================================================
+   4) ตัวช่วยคำนวณจากจุดบนใบหน้า (68 จุด)
+   ========================================================= */
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// Eye Aspect Ratio: ตาเปิด ≈ 0.25–0.35, ตาปิด < 0.2
+function eyeRatio(p, i) {
+  return (dist(p[i + 1], p[i + 5]) + dist(p[i + 2], p[i + 4])) / (2 * dist(p[i], p[i + 3]));
+}
+// ตำแหน่งปลายจมูกเทียบกับความกว้างกราม: หน้าตรง ≈ 0.5
+function yawRatio(p) { return (p[30].x - p[0].x) / (p[16].x - p[0].x); }
+
+/* =========================================================
+   5) ขั้นตอนพิสูจน์ว่าเป็นคนจริง (สุ่มลำดับทุกครั้ง)
+   ========================================================= */
+function buildChallenges() {
+  const turn = Math.random() < 0.5 ? 'left' : 'right';
+  const middle = Math.random() < 0.5 ? ['blink', turn] : [turn, 'blink'];
+  return ['center', ...middle, 'final'];
+}
+const LABELS = {
+  center: 'มองตรงที่กล้อง',
+  blink: 'กะพริบตา',
+  left: 'หันหน้าไปทางซ้าย',
+  right: 'หันหน้าไปทางขวา',
+  final: 'มองตรงที่กล้องอีกครั้ง'
+};
+
+function drawRing(steps, idx) {
+  const r = 46, C = 2 * Math.PI * r, part = C / steps.length, gap = 4;
+  $('ring').innerHTML = steps.map((_, i) => {
+    const cls = i < idx ? 'filled' : (i === idx ? 'current' : '');
+    return `<circle class="seg ${cls}" cx="50" cy="50" r="${r}"
+      stroke-dasharray="${part - gap} ${C - part + gap}" stroke-dashoffset="${-i * part}"></circle>`;
+  }).join('');
+}
+
+async function loadModels() {
+  if (modelsReady) return;
+  $('hint').textContent = 'กำลังโหลดระบบจดจำใบหน้า…';
+  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+  modelsReady = true;
+}
+
+function stopCamera() {
+  running = false;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+}
+
+$('btn-start').onclick = startCheck;
+$('btn-again').onclick = startCheck;
+$('btn-home').onclick = () => show('view-home');
+$('btn-cancel').onclick = () => { stopCamera(); show('view-home'); };
+$('btn-cancel-locate').onclick = () => { cancelled = true; show('view-home'); };
+
+/* =========================================================
+   5.1) รหัสเครื่อง: สุ่มครั้งแรกแล้วเก็บไว้ในเบราว์เซอร์
+   ========================================================= */
+function getDeviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2)) + '-' + Date.now().toString(36);
+      localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  } catch (e) {
+    return null;   // เบราว์เซอร์โหมดส่วนตัวบางตัวเก็บข้อมูลไม่ได้
+  }
+}
+
+function mark(id, state) { $(id).className = 'ck ' + state; }
+
+/* =========================================================
+   5.2) GPS: เฝ้าดูตำแหน่งสูงสุด 15 วินาที แล้วเลือกค่าที่แม่นยำที่สุด
+   ========================================================= */
+function getBestPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject({ code: 0 });
+    let best = null;
+    const finish = () => {
+      navigator.geolocation.clearWatch(watchId);
+      clearTimeout(timer);
+      best ? resolve(best) : reject({ code: 3 });
+    };
+    const watchId = navigator.geolocation.watchPosition(pos => {
+      if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+      $('locate-hint').textContent = `ความแม่นยำตอนนี้ ±${Math.round(pos.coords.accuracy)} เมตร`;
+      if (pos.coords.accuracy <= GPS_GOOD_ACCURACY) finish();
+    }, err => {
+      if (err.code === 1 || (err.code === 2 && !best)) {
+        navigator.geolocation.clearWatch(watchId); clearTimeout(timer); reject(err);
+      }
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: GPS_WAIT_MS });
+    const timer = setTimeout(finish, GPS_WAIT_MS);
+  });
+}
+
+function gpsErrorText(err) {
+  switch (err && err.code) {
+    case 1: return 'ไม่ได้รับอนุญาตให้ใช้ตำแหน่ง: กดไอคอนหน้าช่องที่อยู่เว็บ → สิทธิ์ → ตำแหน่ง → อนุญาต แล้วโหลดหน้าใหม่';
+    case 2: return 'หาตำแหน่งไม่ได้: เปิด "ตำแหน่ง" ในแผงด่วนของมือถือ และเปิด "ความแม่นยำของตำแหน่ง Google"';
+    case 3: return 'รอสัญญาณ GPS นานเกินไป: ออกไปในที่โล่ง ห่างจากอาคารเล็กน้อย แล้วลองใหม่';
+    default: return 'เบราว์เซอร์นี้ไม่รองรับการหาตำแหน่ง ให้ใช้ Chrome หรือ Samsung Internet';
+  }
+}
+
+/* =========================================================
+   5.3) ลำดับการตรวจ: เครื่อง → GPS → พื้นที่ → ใบหน้า
+   ========================================================= */
+async function startCheck() {
+  cancelled = false;
+  lastLocation = null;
+  ['ck-device', 'ck-gps', 'ck-area'].forEach(id => mark(id, ''));
+  $('locate-hint').textContent = '';
+  show('view-locate');
+
+  // (1) ตรวจเครื่อง
+  mark('ck-device', 'doing');
+  const deviceId = getDeviceId();
+  if (!deviceId) { mark('ck-device', 'fail'); return showResult(false, 'ใช้งานในโหมดนี้ไม่ได้', 'ปิดโหมดไม่ระบุตัวตน (Incognito / โหมดลับ) แล้วเปิดหน้านี้ใหม่'); }
+  const { data: dev, error: devErr } = await sb.rpc('register_device', { p_device_id: deviceId });
+  if (cancelled) return;
+  if (devErr) { mark('ck-device', 'fail'); return showResult(false, 'ตรวจสอบเครื่องไม่สำเร็จ', devErr.message); }
+  if (dev === 'mismatch') { mark('ck-device', 'fail'); return showResult(false, 'บัญชีนี้ผูกกับมือถือเครื่องอื่น', 'ถ้าเปลี่ยนมือถือหรือล้างข้อมูลเบราว์เซอร์ ให้แจ้งครูประจำชั้นเพื่อล้างการผูกเครื่อง'); }
+  if (dev === 'shared') { mark('ck-device', 'fail'); return showResult(false, 'มือถือเครื่องนี้ผูกกับนักเรียนคนอื่นแล้ว', 'แต่ละคนต้องเช็กชื่อด้วยมือถือของตัวเอง'); }
+  mark('ck-device', 'done');
+
+  // (2) หาตำแหน่ง
+  mark('ck-gps', 'doing');
+  $('locate-hint').textContent = 'กำลังหาตำแหน่ง… (ถ้าเบราว์เซอร์ถามสิทธิ์ ให้กด "อนุญาต")';
+  let pos;
+  try { pos = await getBestPosition(); }
+  catch (err) { if (cancelled) return; mark('ck-gps', 'fail'); return showResult(false, 'หาตำแหน่งไม่ได้', gpsErrorText(err)); }
+  if (cancelled) return;
+  mark('ck-gps', 'done');
+
+  // (3) ให้เซิร์ฟเวอร์ตรวจว่าอยู่ในพื้นที่
+  mark('ck-area', 'doing');
+  const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+  const { data: loc, error: locErr } = await sb.rpc('location_status', { p_lat: lat, p_lng: lng, p_accuracy: accuracy });
+  if (cancelled) return;
+  if (locErr) { mark('ck-area', 'fail'); return showResult(false, 'ตรวจตำแหน่งไม่สำเร็จ', locErr.message); }
+  const L = loc[0];
+  if (!L.accuracy_ok) { mark('ck-area', 'fail'); return showResult(false, 'สัญญาณ GPS ไม่แม่นยำพอ', `ความคลาดเคลื่อน ±${Math.round(accuracy)} เมตร ให้ออกไปในที่โล่งแล้วลองใหม่`); }
+  if (!L.inside) { mark('ck-area', 'fail'); return showResult(false, 'อยู่นอกพื้นที่โรงเรียน', `ห่างจาก${L.fence_name} ${formatDistance(L.distance_m)} (ต้องอยู่ภายใน ${L.radius_m} เมตร)`); }
+  mark('ck-area', 'done');
+
+  lastLocation = { lat, lng, accuracy, deviceId, distance: L.distance_m, at: Date.now() };
+
+  // (4) สแกนใบหน้า
+  await sleep(500);
+  if (!cancelled) startFaceCheck();
+}
+
+function formatDistance(m) { return m >= 1000 ? (m / 1000).toFixed(1) + ' กม.' : Math.round(m) + ' เมตร'; }
+
+async function startFaceCheck() {
+  show('view-face');
+  $('instruction').textContent = '';
+  const problem = cameraEnvironmentProblem();
+  if (problem) return showResult(false, 'เปิดกล้องไม่ได้', problem);
+
+  try {
+    await loadModels();
+  } catch (e) {
+    return showResult(false, 'โหลดระบบจดจำใบหน้าไม่สำเร็จ', 'ตรวจสอบอินเทอร์เน็ต แล้วลองใหม่ (' + (e.message || e) + ')');
+  }
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } }, audio: false
+    });
+    $('video').srcObject = stream;
+    await $('video').play();
+  } catch (e) {
+    stopCamera();
+    return showResult(false, 'เปิดกล้องไม่ได้', cameraErrorText(e));
+  }
+  runChallenges();
+}
+
+/* ตรวจสภาพแวดล้อมก่อนขอใช้กล้อง */
+function cameraEnvironmentProblem() {
+  const ua = navigator.userAgent;
+  if (/Line\/|FBAN|FBAV|Instagram|Messenger/i.test(ua))
+    return 'กำลังเปิดผ่านแอป LINE หรือ Facebook ซึ่งไม่อนุญาตให้ใช้กล้อง ให้กดเมนู ⋮ แล้วเลือก "เปิดในเบราว์เซอร์" (Chrome หรือ Samsung Internet)';
+  if (!window.isSecureContext)
+    return 'หน้านี้ไม่ได้เปิดผ่าน https กล้องจึงใช้ไม่ได้ ให้เปิดจากลิงก์ที่ขึ้นต้นด้วย https://';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+    return 'เบราว์เซอร์นี้ไม่รองรับการใช้กล้อง ให้เปิดด้วย Chrome หรือ Samsung Internet เวอร์ชันล่าสุด';
+  return '';
+}
+
+/* แปลรหัสข้อผิดพลาดของกล้องเป็นคำแนะนำ */
+function cameraErrorText(e) {
+  switch (e && e.name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'ไม่ได้รับอนุญาตให้ใช้กล้อง: กดไอคอนหน้าช่องที่อยู่เว็บ → สิทธิ์ → กล้อง → อนุญาต แล้วโหลดหน้าใหม่ ถ้ายังไม่ได้ ให้ตรวจสิทธิ์กล้องของแอปเบราว์เซอร์ในการตั้งค่ามือถือ (NotAllowedError)';
+    case 'NotReadableError':
+    case 'AbortError':
+      return 'กล้องถูกแอปอื่นใช้อยู่ ให้ปิดแอปกล้อง แอปวิดีโอคอล หรือแท็บอื่นที่ใช้กล้อง แล้วลองใหม่ (NotReadableError)';
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'ไม่พบกล้องหน้า หรือกล้องไม่รองรับการตั้งค่า ลองรีสตาร์ตมือถือ (' + e.name + ')';
+    default:
+      return 'เกิดข้อผิดพลาด: ' + ((e && (e.name + ' ' + e.message)) || e);
+  }
+}
+
+async function runChallenges() {
+  const video = $('video');
+  const { data: cfg } = await sb.from('settings').select('liveness_seconds').maybeSingle();
+  const limitSec = (cfg && cfg.liveness_seconds) || DEFAULT_LIVENESS_SEC;
+  const steps = buildChallenges();
+  let idx = 0, holdFrames = 0;
+  let openEar = null, eyesClosedSeen = false;
+  let firstDescriptor = null;
+  const startedAt = Date.now();
+  running = true;
+
+  const nextStep = () => { idx++; holdFrames = 0; drawRing(steps, idx); if (steps[idx]) $('instruction').textContent = LABELS[steps[idx]]; };
+  drawRing(steps, 0);
+  $('instruction').textContent = LABELS[steps[0]];
+
+  while (running) {
+    if (Date.now() - startedAt > limitSec * 1000) {
+      stopCamera();
+      return showResult(false, 'หมดเวลา', `ทำตามคำสั่งให้ครบภายใน ${limitSec} วินาที แล้วลองใหม่`);
+    }
+
+    const r = await faceapi.detectSingleFace(video, tinyOpts()).withFaceLandmarks();
+    if (!running) return;
+    if (!r) { $('hint').textContent = 'ยังไม่เห็นใบหน้า'; await sleep(30); continue; }
+
+    const p = r.landmarks.positions;
+    const faceRatio = r.detection.box.width / video.videoWidth;
+    const yaw = yawRatio(p);
+    const ear = (eyeRatio(p, 36) + eyeRatio(p, 42)) / 2;
+    const centered = yaw > 0.4 && yaw < 0.6;
+    const step = steps[idx];
+
+    if (faceRatio < MIN_FACE_RATIO) { $('hint').textContent = 'ขยับเข้าใกล้กล้องอีกนิด'; continue; }
+    $('hint').textContent = '';
+
+    if (step === 'center' || step === 'final') {
+      if (!centered) { holdFrames = 0; $('hint').textContent = 'หันหน้าตรงเข้ากล้อง'; continue; }
+      openEar = openEar === null ? ear : openEar * 0.8 + ear * 0.2;   // จำค่าตาเปิดปกติไว้
+      if (++holdFrames < 4) continue;
+
+      // เก็บลายเซ็นใบหน้า และตรวจว่ามีคนเดียวในภาพ
+      const all = await faceapi.detectAllFaces(video, tinyOpts()).withFaceLandmarks().withFaceDescriptors();
+      if (all.length !== 1) { holdFrames = 0; $('hint').textContent = all.length > 1 ? 'ในภาพต้องมีเพียงคนเดียว' : 'ถือกล้องให้นิ่ง'; continue; }
+      const desc = Array.from(all[0].descriptor);
+
+      if (step === 'center') { firstDescriptor = desc; nextStep(); continue; }
+
+      // final: ต้องเป็นคนเดียวกับตอนเริ่ม
+      if (faceapi.euclideanDistance(firstDescriptor, desc) > SAME_PERSON_MAX) {
+        stopCamera();
+        return showResult(false, 'ตรวจพบการเปลี่ยนใบหน้าระหว่างทำ', 'ให้เจ้าของบัญชีทำเองตั้งแต่ต้นจนจบ');
+      }
+      drawRing(steps, steps.length);
+      stopCamera();
+      return verifyWithServer(desc);
+    }
+
+    if (step === 'blink') {
+      if (!centered) { $('hint').textContent = 'หันหน้าตรงแล้วกะพริบตา'; continue; }
+      if (ear < openEar * 0.65) eyesClosedSeen = true;
+      else if (eyesClosedSeen && ear > openEar * 0.85) nextStep();
+      continue;
+    }
+
+    // หันซ้าย/ขวา (ภาพกล้องหน้าจริงกลับด้านกับที่เห็นบนจอ: หันซ้ายของผู้ใช้ → ค่า yaw เพิ่มขึ้น)
+    if (step === 'left' && yaw > 0.68) nextStep();
+    if (step === 'right' && yaw < 0.32) nextStep();
+  }
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* =========================================================
+   6) ส่งให้เซิร์ฟเวอร์ตัดสิน
+   ========================================================= */
+async function verifyWithServer(descriptor) {
+  $('instruction').textContent = 'กำลังตรวจสอบ…';
+  const { data, error } = await sb.rpc('verify_my_face', { p_embedding: JSON.stringify(descriptor) });
+  if (error) return showResult(false, 'ตรวจสอบไม่สำเร็จ', error.message);
+
+  const { matched, distance } = data[0];
+  if (matched) {
+    // ขั้นที่ 5–6 จะต่อจากตรงนี้: ตรวจ GPS แล้วเรียก check_in เพื่อบันทึกการมาเรียน
+    const where = lastLocation ? ` · อยู่ห่างจุดกึ่งกลาง ${formatDistance(lastLocation.distance)} (GPS ±${Math.round(lastLocation.accuracy)} ม.)` : '';
+    showResult(true, 'ผ่านการตรวจทั้งหมด', `ใบหน้า ${distance.toFixed(3)}${where}`);
+  } else {
+    showResult(false, 'ใบหน้าไม่ตรงกับเจ้าของบัญชี', `ค่าความต่าง ${distance.toFixed(3)} ลองใหม่ในที่ที่มีแสงสว่างพอ`);
+  }
+}
+
+function showResult(pass, big, detail) {
+  $('result').className = 'result ' + (pass ? 'pass' : 'fail');
+  $('r-big').textContent = big;
+  $('r-detail').textContent = detail;
+  show('view-result');
+}
+
+/* =========================================================
+   7) เริ่มต้น
+   ========================================================= */
+sb.auth.getSession().then(({ data }) => { if (data.session) loadProfile(); });
+</script>
+</body>
+</html>
